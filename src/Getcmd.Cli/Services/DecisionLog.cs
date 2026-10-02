@@ -1,4 +1,5 @@
 using System.Globalization;
+using Getcmd.Core;
 using Microsoft.Data.Sqlite;
 
 namespace Getcmd.Cli.Services;
@@ -42,6 +43,44 @@ internal sealed class DecisionLog : IDisposable
         }
 
         return new DecisionLog(connection);
+    }
+
+    /// <summary>
+    /// Appends one decision. A failure goes to the error log instead of being
+    /// thrown: logging must never change the outcome of a decision.
+    /// </summary>
+    public static void Record(
+        AppPaths paths,
+        Config config,
+        string agent,
+        string? sessionId,
+        string cwd,
+        string command,
+        Decision decision,
+        TimeSpan elapsed)
+    {
+        try
+        {
+            using var log = Open(paths);
+            log.Append(
+                new LogEntry(
+                    0,
+                    Timestamp(DateTime.UtcNow),
+                    agent,
+                    sessionId,
+                    cwd,
+                    command,
+                    Names.Of(decision.Level),
+                    Names.Of(decision.Action),
+                    decision.RuleId,
+                    decision.Reason,
+                    (long)elapsed.TotalMilliseconds),
+                config.LogRetentionDays);
+        }
+        catch (Exception ex)
+        {
+            ErrorLog.Write(paths, ex);
+        }
     }
 
     public static string Timestamp(DateTime utc) =>

@@ -5,83 +5,84 @@ using System.Text.Json.Nodes;
 namespace Getcmd.Cli.Services;
 
 /// <summary>
-/// Adds and removes getcmd's PreToolUse entry in a Claude Code settings.json,
+/// Adds and removes getcmd's PreToolUse entries in a Claude Code settings.json,
 /// leaving everything else in the file as it was.
 /// </summary>
 internal static class ClaudeSettings
 {
-    public const string Matcher = "Bash";
     public const string HookCommand = "getcmd hook claude";
     public const int TimeoutSeconds = 5;
+
+    // Every tool matcher getcmd may install an entry for.
+    private static readonly string[] AllMatchers = ["Bash", "PowerShell"];
 
     public static string UserSettingsPath => Path.Combine(AppPaths.UserHome, ".claude", "settings.json");
 
     public static string ProjectSettingsPath(string cwd) => Path.Combine(cwd, ".claude", "settings.json");
 
-    public static bool IsInstalled(string path)
+    /// <summary>The matchers to install: Claude Code only has a PowerShell tool on Windows.</summary>
+    public static IReadOnlyList<string> MatchersFor(bool windows) => windows ? AllMatchers : ["Bash"];
+
+    public static bool IsInstalled(string path, string matcher) =>
+        File.Exists(path) && IsInstalled(Load(path), matcher);
+
+    /// <summary>Adds an entry for each matcher that has none yet; returns the matchers added.</summary>
+    public static List<string> Install(string path, IReadOnlyList<string> matchers)
     {
-        if (!File.Exists(path) || Load(path)["hooks"] is not JsonObject hooks || hooks["PreToolUse"] is not JsonArray entries)
-        {
-            return false;
-        }
-
-        foreach (var entry in entries)
-        {
-            if (IsBashEntry(entry, out var entryHooks) && IndexOfOurHook(entryHooks) >= 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>Returns false when the entry was already there.</summary>
-    public static bool Install(string path)
-    {
-        if (IsInstalled(path))
-        {
-            return false;
-        }
-
         var root = File.Exists(path) ? Load(path) : new JsonObject();
-        var hooks = GetOrAdd(root, "hooks", path, () => new JsonObject());
-        var entries = GetOrAdd(hooks, "PreToolUse", path, () => new JsonArray());
-        // Typed as JsonNode so this binds to the non-generic, AOT-safe Add.
-        JsonNode entry = new JsonObject
-        {
-            ["matcher"] = Matcher,
-            ["hooks"] = new JsonArray(new JsonObject
-            {
-                ["type"] = "command",
-                ["command"] = HookCommand,
-                ["timeout"] = TimeoutSeconds,
-            }),
-        };
-        entries.Add(entry);
+        var added = new List<string>();
 
-        Save(path, root);
-        return true;
+        foreach (var matcher in matchers)
+        {
+            if (IsInstalled(root, matcher))
+            {
+                continue;
+            }
+
+            var hooks = GetOrAdd(root, "hooks", path, () => new JsonObject());
+            var entries = GetOrAdd(hooks, "PreToolUse", path, () => new JsonArray());
+
+            // Typed as JsonNode so this binds to the non-generic, AOT-safe Add.
+            JsonNode entry = new JsonObject
+            {
+                ["matcher"] = matcher,
+                ["hooks"] = new JsonArray(new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = HookCommand,
+                    ["timeout"] = TimeoutSeconds,
+                }),
+            };
+            entries.Add(entry);
+            added.Add(matcher);
+        }
+
+        if (added.Count > 0)
+        {
+            Save(path, root);
+        }
+
+        return added;
     }
 
-    /// <summary>Returns false when there was nothing to remove.</summary>
-    public static bool Uninstall(string path)
+    /// <summary>Removes getcmd's hook under every matcher; returns the matchers it was removed from.</summary>
+    public static List<string> Uninstall(string path)
     {
+        var removed = new List<string>();
         if (!File.Exists(path))
         {
-            return false;
+            return removed;
         }
 
         var root = Load(path);
         if (root["hooks"] is not JsonObject hooks || hooks["PreToolUse"] is not JsonArray entries)
         {
-            return false;
+            return removed;
         }
 
-        var removed = false;
-        for (var i = entries.Count - 1; i >= 0; i--)
+        for (var i = 0; i < entries.Count; i++)
         {
-            if (!IsBashEntry(entries[i], out var entryHooks))
+            if (!IsOurMatcherEntry(entries[i], out var matcher, out var entryHooks))
             {
                 continue;
             }
@@ -93,18 +94,21 @@ internal static class ClaudeSettings
                 removedHere = true;
             }
 
+            if (removedHere && !removed.Contains(matcher))
+            {
+                removed.Add(matcher);
+            }
+
             // Only drop an entry that we emptied ourselves.
             if (removedHere && entryHooks.Count == 0)
             {
-                entries.RemoveAt(i);
+                entries.RemoveAt(i--);
             }
-
-            removed |= removedHere;
         }
 
-        if (!removed)
+        if (removed.Count == 0)
         {
-            return false;
+            return removed;
         }
 
         if (entries.Count == 0)
@@ -118,16 +122,40 @@ internal static class ClaudeSettings
         }
 
         Save(path, root);
-        return true;
+        return removed;
     }
 
-    private static bool IsBashEntry(JsonNode? entry, out JsonArray entryHooks)
+    private static bool IsInstalled(JsonObject root, string matcher)
     {
+        if (root["hooks"] is not JsonObject hooks || hooks["PreToolUse"] is not JsonArray entries)
+        {
+            return false;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (IsOurMatcherEntry(entry, out var entryMatcher, out var entryHooks)
+                && entryMatcher == matcher
+                && IndexOfOurHook(entryHooks) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // True for a PreToolUse entry whose matcher is one getcmd installs under.
+    private static bool IsOurMatcherEntry(JsonNode? entry, out string matcher, out JsonArray entryHooks)
+    {
+        matcher = "";
         entryHooks = null!;
         if (entry is JsonObject entryObject
-            && StringValue(entryObject["matcher"]) == Matcher
+            && StringValue(entryObject["matcher"]) is { } value
+            && Array.IndexOf(AllMatchers, value) >= 0
             && entryObject["hooks"] is JsonArray array)
         {
+            matcher = value;
             entryHooks = array;
             return true;
         }

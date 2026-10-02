@@ -27,7 +27,7 @@ internal static class HookCommand
             var started = Stopwatch.GetTimestamp();
             var input = JsonSerializer.Deserialize(stdin, HookJsonContext.Default.HookInput);
             var command = input?.ToolInput?.Command;
-            if (input?.ToolName != "Bash" || string.IsNullOrWhiteSpace(command))
+            if (input?.ToolName is not ("Bash" or "PowerShell") || string.IsNullOrWhiteSpace(command))
             {
                 return 0;
             }
@@ -37,30 +37,8 @@ internal static class HookCommand
             var cwd = string.IsNullOrEmpty(input.Cwd) ? Environment.CurrentDirectory : input.Cwd;
             var decision = RuleEngine.Evaluate(command, ConfigService.ToContext(config, cwd), ConfigService.ActiveRules(config));
             var level = Names.Of(decision.Level);
-
-            try
-            {
-                using var log = DecisionLog.Open(paths);
-                log.Append(
-                    new LogEntry(
-                        0,
-                        DecisionLog.Timestamp(DateTime.UtcNow),
-                        Agent,
-                        input.SessionId,
-                        cwd,
-                        command,
-                        level,
-                        Names.Of(decision.Action),
-                        decision.RuleId,
-                        decision.Reason,
-                        (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds),
-                    config.LogRetentionDays);
-            }
-            catch (Exception ex)
-            {
-                // A logging failure must not turn a block into an allow.
-                LogError(paths, ex);
-            }
+            DecisionLog.Record(
+                paths, config, Agent, input.SessionId, cwd, command, decision, Stopwatch.GetElapsedTime(started));
 
             switch (decision.Action)
             {
@@ -85,24 +63,44 @@ internal static class HookCommand
         }
         catch (Exception ex)
         {
-            LogError(AppPaths.Resolve(), ex);
+            ErrorLog.Write(AppPaths.Resolve(), ex);
             return 0;
         }
     }
 
-    public static int Install(string settingsPath, TextWriter stdout)
+    /// <summary>Adds the hook for "Bash" and, on Windows, for "PowerShell" as well.</summary>
+    public static int Install(string settingsPath, TextWriter stdout, bool? windows = null)
     {
-        stdout.WriteLine(ClaudeSettings.Install(settingsPath)
-            ? $"Added PreToolUse hook to {settingsPath}: matcher \"{ClaudeSettings.Matcher}\", command \"{ClaudeSettings.HookCommand}\", timeout {ClaudeSettings.TimeoutSeconds}"
-            : $"Hook already present in {settingsPath}; nothing changed");
+        var added = ClaudeSettings.Install(settingsPath, ClaudeSettings.MatchersFor(windows ?? OperatingSystem.IsWindows()));
+        foreach (var matcher in added)
+        {
+            stdout.WriteLine(
+                $"Added PreToolUse hook to {settingsPath}: matcher \"{matcher}\","
+                + $" command \"{ClaudeSettings.HookCommand}\", timeout {ClaudeSettings.TimeoutSeconds}");
+        }
+
+        if (added.Count == 0)
+        {
+            stdout.WriteLine($"Hook already present in {settingsPath}; nothing changed");
+        }
+
         return 0;
     }
 
     public static int Uninstall(string settingsPath, TextWriter stdout)
     {
-        stdout.WriteLine(ClaudeSettings.Uninstall(settingsPath)
-            ? $"Removed PreToolUse hook \"{ClaudeSettings.HookCommand}\" from {settingsPath}"
-            : $"Hook not found in {settingsPath}; nothing changed");
+        var removed = ClaudeSettings.Uninstall(settingsPath);
+        foreach (var matcher in removed)
+        {
+            stdout.WriteLine(
+                $"Removed PreToolUse hook from {settingsPath}: matcher \"{matcher}\", command \"{ClaudeSettings.HookCommand}\"");
+        }
+
+        if (removed.Count == 0)
+        {
+            stdout.WriteLine($"Hook not found in {settingsPath}; nothing changed");
+        }
+
         return 0;
     }
 
@@ -126,17 +124,4 @@ internal static class HookCommand
         "creds-in-command" => "Pass the credential through an environment variable or a config file.",
         _ => null,
     };
-
-    private static void LogError(AppPaths paths, Exception exception)
-    {
-        try
-        {
-            paths.EnsureHome();
-            File.AppendAllText(paths.HookErrorLog, $"{DecisionLog.Timestamp(DateTime.UtcNow)} {exception}{Environment.NewLine}");
-        }
-        catch
-        {
-            // Nowhere left to report it.
-        }
-    }
 }

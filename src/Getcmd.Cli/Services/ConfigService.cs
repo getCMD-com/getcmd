@@ -28,8 +28,26 @@ internal sealed class Config
 
 internal static class ConfigService
 {
-    /// <summary>Reads config.json, writing the defaults first if it does not exist yet.</summary>
+    /// <summary>
+    /// Reads config.json, writing the defaults first if it does not exist yet.
+    /// Never throws: an unreadable or invalid config is recorded in the error
+    /// log and the defaults are used, so enforcement continues.
+    /// </summary>
     public static Config Load(AppPaths paths)
+    {
+        try
+        {
+            return LoadStrict(paths);
+        }
+        catch (Exception ex)
+        {
+            ErrorLog.Write(paths, ex);
+            return new Config();
+        }
+    }
+
+    /// <summary>Like Load, but throws when config.json cannot be read or is invalid.</summary>
+    public static Config LoadStrict(AppPaths paths)
     {
         if (!File.Exists(paths.ConfigFile))
         {
@@ -38,8 +56,24 @@ internal static class ConfigService
             return defaults;
         }
 
-        using var stream = File.OpenRead(paths.ConfigFile);
-        return JsonSerializer.Deserialize(stream, CliJsonContext.Default.Config) ?? new Config();
+        Config config;
+        try
+        {
+            using var stream = File.OpenRead(paths.ConfigFile);
+            config = JsonSerializer.Deserialize(stream, CliJsonContext.Default.Config)
+                ?? throw new FormatException("config.json: expected a JSON object");
+        }
+        catch (JsonException ex)
+        {
+            throw new FormatException($"config.json: {ex.Message}", ex);
+        }
+
+        if (config.Actions is not null)
+        {
+            Overlay([], config.Actions);
+        }
+
+        return config;
     }
 
     public static void Save(AppPaths paths, Config config)

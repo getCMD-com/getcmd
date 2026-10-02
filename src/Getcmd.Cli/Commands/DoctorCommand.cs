@@ -47,16 +47,27 @@ internal static class DoctorCommand
 
         Check("config parses", () =>
         {
-            ConfigService.ToContext(ConfigService.Load(paths), Environment.CurrentDirectory);
+            try
+            {
+                ConfigService.LoadStrict(paths);
+            }
+            catch (Exception ex)
+            {
+                throw new FormatException($"{ex.Message} (defaults are in use until it is fixed)", ex);
+            }
+
             return paths.ConfigFile;
         });
 
         Check("hook installed", () =>
         {
             var settings = ClaudeSettings.UserSettingsPath;
-            return ClaudeSettings.IsInstalled(settings)
-                ? settings
-                : throw new InvalidOperationException($"not found in {settings}; run: getcmd hook claude --install");
+            var matchers = ClaudeSettings.MatchersFor(OperatingSystem.IsWindows());
+            var missing = matchers.Where(matcher => !ClaudeSettings.IsInstalled(settings, matcher)).ToList();
+            return missing.Count == 0
+                ? $"{settings} ({string.Join(", ", matchers)})"
+                : throw new InvalidOperationException(
+                    $"no entry for {string.Join(", ", missing)} in {settings}; run: getcmd hook claude --install");
         });
 
         Check("version", () => AppInfo.Version);

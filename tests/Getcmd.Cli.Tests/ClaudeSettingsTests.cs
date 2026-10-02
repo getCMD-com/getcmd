@@ -37,13 +37,22 @@ public sealed class ClaudeSettingsTests : IDisposable
 
     private JsonNode Read() => JsonNode.Parse(File.ReadAllText(SettingsPath))!;
 
+    private static void AssertOurEntry(JsonNode? entry, string matcher)
+    {
+        Assert.Equal(matcher, (string?)entry!["matcher"]);
+        var hook = Assert.Single(entry["hooks"]!.AsArray())!;
+        Assert.Equal("command", (string?)hook["type"]);
+        Assert.Equal("getcmd hook claude", (string?)hook["command"]);
+        Assert.Equal(5, (int?)hook["timeout"]);
+    }
+
     [Fact]
     public void InstallMergesIntoExistingSettings()
     {
         WriteExisting(Existing);
         var stdout = new StringWriter();
 
-        Assert.Equal(0, HookCommand.Install(SettingsPath, stdout));
+        Assert.Equal(0, HookCommand.Install(SettingsPath, stdout, windows: false));
 
         var settings = Read();
         Assert.Equal("opus", (string?)settings["model"]);
@@ -54,26 +63,57 @@ public sealed class ClaudeSettingsTests : IDisposable
         var entries = settings["hooks"]!["PreToolUse"]!.AsArray();
         Assert.Equal(2, entries.Count);
         Assert.Equal("sh ~/.claude/hooks/other.sh", (string?)entries[0]!["hooks"]![0]!["command"]);
-        Assert.Equal("Bash", (string?)entries[1]!["matcher"]);
-
-        var hook = Assert.Single(entries[1]!["hooks"]!.AsArray())!;
-        Assert.Equal("command", (string?)hook["type"]);
-        Assert.Equal("getcmd hook claude", (string?)hook["command"]);
-        Assert.Equal(5, (int?)hook["timeout"]);
+        AssertOurEntry(entries[1], "Bash");
 
         Assert.StartsWith("Added PreToolUse hook", stdout.ToString());
-        Assert.True(ClaudeSettings.IsInstalled(SettingsPath));
+        Assert.Contains("matcher \"Bash\"", stdout.ToString());
+        Assert.DoesNotContain("PowerShell", stdout.ToString());
+        Assert.True(ClaudeSettings.IsInstalled(SettingsPath, "Bash"));
+        Assert.False(ClaudeSettings.IsInstalled(SettingsPath, "PowerShell"));
     }
 
     [Fact]
-    public void InstallIsIdempotent()
+    public void InstallOnWindowsAddsPowerShellEntryToo()
     {
         WriteExisting(Existing);
-        HookCommand.Install(SettingsPath, new StringWriter());
+        var stdout = new StringWriter();
+
+        HookCommand.Install(SettingsPath, stdout, windows: true);
+
+        var entries = Read()["hooks"]!["PreToolUse"]!.AsArray();
+        Assert.Equal(3, entries.Count);
+        AssertOurEntry(entries[1], "Bash");
+        AssertOurEntry(entries[2], "PowerShell");
+        Assert.Contains("matcher \"Bash\"", stdout.ToString());
+        Assert.Contains("matcher \"PowerShell\"", stdout.ToString());
+        Assert.True(ClaudeSettings.IsInstalled(SettingsPath, "PowerShell"));
+    }
+
+    [Fact]
+    public void InstallOnWindowsAddsOnlyTheMissingEntry()
+    {
+        WriteExisting(Existing);
+        HookCommand.Install(SettingsPath, new StringWriter(), windows: false);
+        var stdout = new StringWriter();
+
+        HookCommand.Install(SettingsPath, stdout, windows: true);
+
+        Assert.Equal(3, Read()["hooks"]!["PreToolUse"]!.AsArray().Count);
+        Assert.DoesNotContain("matcher \"Bash\"", stdout.ToString());
+        Assert.Contains("matcher \"PowerShell\"", stdout.ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InstallIsIdempotent(bool windows)
+    {
+        WriteExisting(Existing);
+        HookCommand.Install(SettingsPath, new StringWriter(), windows);
         var afterFirst = File.ReadAllText(SettingsPath);
         var stdout = new StringWriter();
 
-        HookCommand.Install(SettingsPath, stdout);
+        HookCommand.Install(SettingsPath, stdout, windows);
 
         Assert.Equal(afterFirst, File.ReadAllText(SettingsPath));
         Assert.Contains("nothing changed", stdout.ToString());
@@ -82,36 +122,39 @@ public sealed class ClaudeSettingsTests : IDisposable
     [Fact]
     public void InstallCreatesSettingsWhenMissing()
     {
-        Assert.False(ClaudeSettings.IsInstalled(SettingsPath));
+        Assert.False(ClaudeSettings.IsInstalled(SettingsPath, "Bash"));
 
-        Assert.True(ClaudeSettings.Install(SettingsPath));
+        Assert.Equal(["Bash"], ClaudeSettings.Install(SettingsPath, ClaudeSettings.MatchersFor(windows: false)));
 
-        var entry = Assert.Single(Read()["hooks"]!["PreToolUse"]!.AsArray())!;
-        Assert.Equal("getcmd hook claude", (string?)entry["hooks"]![0]!["command"]);
+        AssertOurEntry(Assert.Single(Read()["hooks"]!["PreToolUse"]!.AsArray()), "Bash");
     }
 
-    [Fact]
-    public void UninstallRemovesExactlyOurEntry()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UninstallRemovesExactlyOurEntries(bool windows)
     {
         WriteExisting(Existing);
         var before = Read().ToJsonString();
-        HookCommand.Install(SettingsPath, new StringWriter());
+        HookCommand.Install(SettingsPath, new StringWriter(), windows);
         var stdout = new StringWriter();
 
         Assert.Equal(0, HookCommand.Uninstall(SettingsPath, stdout));
 
         Assert.Equal(before, Read().ToJsonString());
-        Assert.StartsWith("Removed PreToolUse hook", stdout.ToString());
-        Assert.False(ClaudeSettings.IsInstalled(SettingsPath));
+        Assert.Contains("matcher \"Bash\"", stdout.ToString());
+        Assert.Equal(windows, stdout.ToString().Contains("matcher \"PowerShell\""));
+        Assert.False(ClaudeSettings.IsInstalled(SettingsPath, "Bash"));
+        Assert.False(ClaudeSettings.IsInstalled(SettingsPath, "PowerShell"));
     }
 
     [Fact]
     public void UninstallDropsContainersItEmptied()
     {
         WriteExisting("""{ "model": "opus" }""");
-        ClaudeSettings.Install(SettingsPath);
+        ClaudeSettings.Install(SettingsPath, ClaudeSettings.MatchersFor(windows: true));
 
-        Assert.True(ClaudeSettings.Uninstall(SettingsPath));
+        Assert.Equal(["Bash", "PowerShell"], ClaudeSettings.Uninstall(SettingsPath));
 
         var settings = Read().AsObject();
         Assert.Equal("opus", (string?)settings["model"]);
@@ -136,7 +179,8 @@ public sealed class ClaudeSettingsTests : IDisposable
         const string odd = """{ "hooks": ["not", "an", "object"] }""";
         WriteExisting(odd);
 
-        Assert.Throws<InvalidDataException>(() => ClaudeSettings.Install(SettingsPath));
+        Assert.Throws<InvalidDataException>(
+            () => ClaudeSettings.Install(SettingsPath, ClaudeSettings.MatchersFor(windows: true)));
 
         Assert.Equal(odd, File.ReadAllText(SettingsPath));
     }

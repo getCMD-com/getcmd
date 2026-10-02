@@ -176,15 +176,65 @@ public sealed class CliTests : IDisposable
         Assert.Contains("JsonException", File.ReadAllText(Path.Combine(_home, "hook-errors.log")));
     }
 
-    [Fact]
-    public void HookWithBrokenConfigExitsZeroAndLogsTheError()
+    [Theory]
+    [InlineData("""{ "actions": { "destructive": "explode" } }""", "unknown action \"explode\"")]
+    [InlineData("""{ "actions": { "destructive": "allow" }, """, "config.json: ")]
+    [InlineData("null", "expected a JSON object")]
+    public void InvalidConfigFallsBackToDefaultsAndKeepsEnforcing(string config, string expectedError)
     {
-        File.WriteAllText(Path.Combine(_home, "config.json"), """{ "actions": { "destructive": "explode" } }""");
+        var configFile = Path.Combine(_home, "config.json");
+        File.WriteAllText(configFile, config);
 
-        var (exit, _, _) = RunHook(Payload("git reset --hard"));
+        var (exit, _, stderr) = RunHook(Payload("git reset --hard"));
 
-        Assert.Equal(0, exit);
-        Assert.Contains("unknown action \"explode\"", File.ReadAllText(Path.Combine(_home, "hook-errors.log")));
+        Assert.Equal(2, exit);
+        Assert.StartsWith("getcmd blocked (destructive, git-reset-hard)", stderr);
+        Assert.Contains(expectedError, File.ReadAllText(Path.Combine(_home, "hook-errors.log")));
+        Assert.Equal("block", Assert.Single(LogRows()).Action);
+        Assert.Equal(config, File.ReadAllText(configFile));
+    }
+
+    [Fact]
+    public void InvalidConfigIsReportedByDoctorAndNotOverwritten()
+    {
+        var configFile = Path.Combine(_home, "config.json");
+        File.WriteAllText(configFile, "{ not json");
+
+        var doctor = Run(null, "doctor");
+        Assert.Equal(1, doctor.Exit);
+        Assert.Matches(@"FAIL\s+config parses\s+config\.json: ", doctor.Out);
+
+        var disable = Run(null, "rules", "disable", "git-clean");
+        Assert.Equal(1, disable.Exit);
+        Assert.Contains("config.json", disable.Err);
+        Assert.Equal("{ not json", File.ReadAllText(configFile));
+
+        Assert.Equal(2, Run(null, "check", "git reset --hard").Exit);
+    }
+
+    [Fact]
+    public void HookEvaluatesPowerShellToolCalls()
+    {
+        var (exit, _, stderr) = RunHook(Payload("git reset --hard", toolName: "PowerShell"));
+
+        Assert.Equal(2, exit);
+        Assert.StartsWith("getcmd blocked (destructive, git-reset-hard)", stderr);
+        Assert.Single(LogRows());
+    }
+
+    [Fact]
+    public void CheckWritesLogRowAsCli()
+    {
+        Run(null, "check", "npm publish", "--cwd", Cwd);
+
+        var row = Assert.Single(LogRows());
+        Assert.Equal("cli", row.Agent);
+        Assert.Null(row.SessionId);
+        Assert.Equal(Cwd, row.Cwd);
+        Assert.Equal("npm publish", row.Command);
+        Assert.Equal("egress", row.Level);
+        Assert.Equal("ask", row.Action);
+        Assert.Equal("publish", row.RuleId);
     }
 
     [Fact]

@@ -82,8 +82,9 @@ internal static class RulesCommand
             return 1;
         }
 
+        // Strict: saving over a config that failed to parse would wipe the user's settings.
         var paths = AppPaths.Resolve();
-        var config = ConfigService.Load(paths);
+        var config = ConfigService.LoadStrict(paths);
         var disabled = config.DisabledRules ??= [];
 
         if (disable == disabled.Contains(id))

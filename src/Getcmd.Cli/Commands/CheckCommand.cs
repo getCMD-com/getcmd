@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Getcmd.Cli.Services;
 using Getcmd.Core;
@@ -8,13 +9,17 @@ namespace Getcmd.Cli.Commands;
 /// <summary>getcmd check: classify one command line and show the decision.</summary>
 internal static class CheckCommand
 {
+    private const string Agent = "cli";
     private const int MaxRawWidth = 48;
 
     public static int Run(string command, string? cwd, bool json, TextWriter stdout)
     {
-        var config = ConfigService.Load(AppPaths.Resolve());
+        var started = Stopwatch.GetTimestamp();
+        var paths = AppPaths.Resolve();
+        var config = ConfigService.Load(paths);
         var ctx = ConfigService.ToContext(config, cwd ?? Environment.CurrentDirectory);
         var decision = RuleEngine.Evaluate(command, ctx, ConfigService.ActiveRules(config));
+        DecisionLog.Record(paths, config, Agent, null, ctx.Cwd, command, decision, Stopwatch.GetElapsedTime(started));
 
         if (json)
         {
