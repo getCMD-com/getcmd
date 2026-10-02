@@ -3,12 +3,25 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>getcmd</AssemblyName>
+    <RootNamespace>Getcmd.Cli</RootNamespace>
+    <Version>0.0.1-dev</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Getcmd.Core\Getcmd.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="System.CommandLine" Version="2.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\rules\cases.json" LogicalName="cases.json" />
+    <InternalsVisibleTo Include="Getcmd.Cli.Tests" />
   </ItemGroup>
 
 </Project>
