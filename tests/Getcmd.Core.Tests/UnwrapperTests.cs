@@ -185,6 +185,7 @@ public class UnwrapperTests
         Assert.False(result.Sudo);
         Assert.Null(result.RemoteHost);
         Assert.Null(result.Wrapper);
+        Assert.False(result.DepthExceeded);
     }
 
     [Theory]
@@ -304,6 +305,27 @@ public class UnwrapperTests
 
         AssertWords(Assert.Single(result.Commands), "sudo", "rm", "x");
         Assert.True(result.Sudo);
+        Assert.True(result.DepthExceeded);
+    }
+
+    [Fact]
+    public void DepthIsNotExceededWhenFourLayersSuffice()
+    {
+        var result = Unwrap("sudo env A=1 nohup nice rm x");
+
+        AssertWords(Assert.Single(result.Commands), "rm", "x");
+        Assert.False(result.DepthExceeded);
+    }
+
+    [Fact]
+    public void DepthExceededInsideCommandString()
+    {
+        var result = Unwrap("sudo env A=1 nohup bash -c 'ls; sudo rm x'");
+
+        Assert.Equal(2, result.Commands.Count);
+        AssertWords(result.Commands[0], "ls");
+        AssertWords(result.Commands[1], "sudo", "rm", "x");
+        Assert.True(result.DepthExceeded);
     }
 
     [Fact]

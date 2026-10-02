@@ -6,7 +6,8 @@ public sealed record UnwrapResult(
     IReadOnlyList<SimpleCommand> Commands,
     bool Sudo,
     string? RemoteHost,
-    string? Wrapper);
+    string? Wrapper,
+    bool DepthExceeded);
 
 /// <summary>
 /// Peels wrappers (sudo, env, bash -c, xargs, ssh, ...) off a command to expose
@@ -38,6 +39,7 @@ public static class Unwrapper
         public bool Sudo;
         public string? RemoteHost;
         public string? Wrapper;
+        public bool DepthExceeded;
     }
 
     public static UnwrapResult Unwrap(SimpleCommand cmd)
@@ -47,12 +49,22 @@ public static class Unwrapper
         var state = new State();
         var commands = new List<SimpleCommand>();
         Expand(cmd, 0, state, commands);
-        return new UnwrapResult(commands, state.Sudo, state.RemoteHost, state.Wrapper);
+        return new UnwrapResult(commands, state.Sudo, state.RemoteHost, state.Wrapper, state.DepthExceeded);
     }
 
     private static void Expand(SimpleCommand cmd, int depth, State state, List<SimpleCommand> output)
     {
-        if (depth >= MaxDepth || !TryUnwrap(cmd, depth, state, output))
+        if (depth >= MaxDepth)
+        {
+            // Probe with throwaway state: would another layer have come off?
+            if (TryUnwrap(cmd, depth, new State(), []))
+            {
+                state.DepthExceeded = true;
+            }
+
+            output.Add(cmd);
+        }
+        else if (!TryUnwrap(cmd, depth, state, output))
         {
             output.Add(cmd);
         }
@@ -404,7 +416,8 @@ public static class Unwrapper
         return true;
     }
 
-    private static string ProgramName(string program)
+    // Program without its directory or a ".exe" suffix.
+    internal static string ProgramName(string program)
     {
         var name = program[(program.AsSpan().LastIndexOfAny('/', '\\') + 1)..];
         return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;

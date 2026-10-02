@@ -17,7 +17,7 @@ public static class PathResolver
         ArgumentNullException.ThrowIfNull(home);
         ArgumentNullException.ThrowIfNull(buildDirs);
 
-        if (!LooksLikePath(arg) && !ContainsName(buildDirs, arg))
+        if (IsNeverPath(arg))
         {
             return PathScope.Unknown;
         }
@@ -87,26 +87,31 @@ public static class PathResolver
     {
         ArgumentNullException.ThrowIfNull(arg);
 
-        if (arg.Length == 0 || arg[0] == '-' || arg.Contains("://", StringComparison.Ordinal))
-        {
-            return false;
-        }
+        return !IsNeverPath(arg)
+            && (HasPathPrefix(arg) || arg.AsSpan().IndexOfAny('/', '\\') >= 0 || ContainsName(KnownNames, arg));
+    }
 
-        if (arg[0] is '/' or '~' or '.' || IsDrivePath(arg) || HomeVariableLength(arg) > 0)
+    // Flags, URLs and remote targets (user@host, host:path, image:tag) are
+    // never local paths. Neither is the empty string.
+    private static bool IsNeverPath(string arg)
+    {
+        if (arg.Length == 0 || arg[0] == '-' || arg.Contains("://", StringComparison.Ordinal))
         {
             return true;
         }
 
-        // user@host, host:path, image:tag and the like are not local paths.
-        var separator = arg.AsSpan().IndexOfAny('/', '\\');
-        var marker = arg.AsSpan().IndexOfAny('@', ':');
-        if (marker >= 0 && (separator < 0 || marker < separator))
+        if (HasPathPrefix(arg))
         {
             return false;
         }
 
-        return separator >= 0 || ContainsName(KnownNames, arg);
+        var separator = arg.AsSpan().IndexOfAny('/', '\\');
+        var marker = arg.AsSpan().IndexOfAny('@', ':');
+        return marker >= 0 && (separator < 0 || marker < separator);
     }
+
+    private static bool HasPathPrefix(string arg) =>
+        arg[0] is '/' or '~' or '.' || IsDrivePath(arg) || HomeVariableLength(arg) > 0;
 
     // Splits a path into normalised segments. A drive, whether written "C:\" or
     // Git Bash style "/c/", becomes a leading "c:" segment. Relative paths are
