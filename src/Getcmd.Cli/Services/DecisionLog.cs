@@ -21,6 +21,14 @@ internal sealed class DecisionLog : IDisposable
 
     private readonly SqliteConnection _connection;
 
+    static DecisionLog()
+    {
+        // Microsoft.Data.Sqlite.Core leaves provider selection to the app. e_sqlite3
+        // is either the shared library from SQLitePCLRaw.lib.e_sqlite3 or, in the
+        // Native AOT release build, linked into the binary.
+        SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
+    }
+
     private DecisionLog(SqliteConnection connection) => _connection = connection;
 
     public static DecisionLog Open(AppPaths paths)

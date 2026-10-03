@@ -15,8 +15,22 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <!-- Core + provider + lib instead of the bundle: the provider is set explicitly in
+         DecisionLog, and the lib package supplies the shared e_sqlite3 for non-AOT builds. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.12" />
+    <PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.12" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
     <PackageReference Include="System.CommandLine" Version="2.0.12" />
+  </ItemGroup>
+
+  <!-- Native AOT with SQLite linked in. The release workflow compiles the SQLite
+       amalgamation to an object file and passes its path as SqliteStaticObject; the
+       provider's "e_sqlite3" P/Invokes then bind to it directly and no e_sqlite3
+       shared library is needed next to the binary. -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$(SqliteStaticObject)' != ''">
+    <DirectPInvoke Include="e_sqlite3" />
+    <NativeLibrary Include="$(SqliteStaticObject)" />
+    <LinkerArg Include="-lm -ldl -lpthread" Condition="$(RuntimeIdentifier.StartsWith('linux'))" />
   </ItemGroup>
 
   <ItemGroup>
