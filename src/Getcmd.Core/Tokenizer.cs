@@ -33,6 +33,8 @@ public static class Tokenizer
         var plain = true;
         // Operator of a redirection that is still waiting for its target token.
         string? redirect = null;
+        // True between a PowerShell call operator and the end of the program token.
+        var callTarget = false;
         var commandStart = 0;
         Connector? pending = null;
         var n = line.Length;
@@ -54,6 +56,7 @@ public static class Tokenizer
 
                 token.Clear();
                 inToken = false;
+                callTarget = false;
             }
 
             plain = true;
@@ -85,6 +88,7 @@ public static class Tokenizer
         void EndCommand(int end, Connector? next)
         {
             EndToken();
+            callTarget = false;
             if (redirect is not null)
             {
                 redirections.Add(new Redirection(redirect, ""));
@@ -118,6 +122,14 @@ public static class Tokenizer
 
             switch (c)
             {
+                case '\\' when callTarget:
+                    // A bare Windows path after "&": backslashes are separators, not escapes.
+                    token.Append('\\');
+                    inToken = true;
+                    plain = false;
+                    i++;
+                    break;
+
                 case '\\':
                     if (i + 1 >= n)
                     {
@@ -228,6 +240,14 @@ public static class Tokenizer
                 case '&' when next == '&':
                     EndCommand(i, Connector.And);
                     commandStart = i += 2;
+                    break;
+
+                case '&' when tokens.Count == 0 && !inToken && redirections.Count == 0 && redirect is null
+                    && (next is ' ' or '\t' or '\'' or '"'):
+                    // PowerShell call operator at the start of a command: "& 'C:\tools\x.exe' args".
+                    // The program is whatever follows; the '&' itself is dropped.
+                    callTarget = true;
+                    i++;
                     break;
 
                 case '&':

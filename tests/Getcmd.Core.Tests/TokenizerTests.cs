@@ -189,6 +189,39 @@ public class TokenizerTests
         AssertCommand(commands[1], "rm", ["x"], "rm x", Connector.Background);
     }
 
+    [Theory]
+    [InlineData(@"& 'C:\tools\plink.exe' vps 'rm -rf /data'", @"C:\tools\plink.exe")]
+    [InlineData(@"& ""C:\Program Files\PuTTY\pscp.exe"" vps 'rm -rf /data'", @"C:\Program Files\PuTTY\pscp.exe")]
+    [InlineData(@"&  C:\tools\plink.exe vps 'rm -rf /data'", @"C:\tools\plink.exe")]
+    public void PowerShellCallOperatorIsDropped(string line, string program)
+    {
+        var command = Assert.Single(Tokenizer.Split(line));
+
+        Assert.Equal(program, command.Program);
+        Assert.Equal(["vps", "rm -rf /data"], command.Args);
+        Assert.Equal(line, command.Raw);
+        Assert.Null(command.Before);
+    }
+
+    [Fact]
+    public void CallOperatorAfterConnectorKeepsTheConnector()
+    {
+        var commands = Tokenizer.Split("cd src; & './build.sh' --release | & 'tee' log");
+
+        Assert.Equal(3, commands.Count);
+        AssertCommand(commands[1], "./build.sh", ["--release"], "& './build.sh' --release", Connector.Semicolon);
+        AssertCommand(commands[2], "tee", ["log"], "& 'tee' log", Connector.Pipe);
+    }
+
+    [Fact]
+    public void AmpersandAfterAWordIsStillBackground()
+    {
+        var commands = Tokenizer.Split("sleep 1 & 'rm' x");
+
+        Assert.Equal(2, commands.Count);
+        Assert.Equal(Connector.Background, commands[1].Before);
+    }
+
     [Fact]
     public void TrailingBackgroundAmpersandIsNotAnArg()
     {

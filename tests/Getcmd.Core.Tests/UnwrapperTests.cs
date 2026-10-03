@@ -145,6 +145,68 @@ public class UnwrapperTests
     }
 
     [Fact]
+    public void PlinkRemoteCommandIsSplit()
+    {
+        var result = Unwrap("plink -ssh -batch -P 2222 -l deploy -i key.ppk -hostkey SHA256:abc vps \"docker ps && rm -rf /data\"");
+
+        Assert.Equal(2, result.Commands.Count);
+        AssertWords(result.Commands[0], "docker", "ps");
+        AssertWords(result.Commands[1], "rm", "-rf", "/data");
+        Assert.Equal("vps", result.RemoteHost);
+        Assert.Equal("ssh", result.Wrapper);
+    }
+
+    [Fact]
+    public void PlinkWithPasswordKeepsItselfVisible()
+    {
+        var plink = Parse("plink -pw hunter2 deploy@vps ls");
+
+        var result = Unwrapper.Unwrap(plink);
+
+        Assert.Equal(2, result.Commands.Count);
+        Assert.Same(plink, result.Commands[0]);
+        AssertWords(result.Commands[1], "ls");
+        Assert.Equal("vps", result.RemoteHost);
+    }
+
+    [Theory]
+    [InlineData("plink vps")]
+    [InlineData("putty -ssh -P 2222 vps")]
+    [InlineData("plink -batch vps -m deploy.sh")]
+    [InlineData("plink -ssh")]
+    public void PuttyWithoutRemoteCommandIsKeptAsIs(string line)
+    {
+        var command = Parse(line);
+
+        var result = Unwrapper.Unwrap(command);
+
+        Assert.Same(command, Assert.Single(result.Commands));
+        Assert.Null(result.Wrapper);
+    }
+
+    [Fact]
+    public void PowerShellCallOperatorPathIsUnwrapped()
+    {
+        var result = Unwrap(@"& 'C:\Program Files\PuTTY\plink.exe' vps 'rm -rf /data'");
+
+        AssertWords(Assert.Single(result.Commands), "rm", "-rf", "/data");
+        Assert.Equal("vps", result.RemoteHost);
+    }
+
+    [Theory]
+    [InlineData("plink", "plink")]
+    [InlineData("plink.exe", "plink")]
+    [InlineData(@"C:\Program Files\PuTTY\plink.EXE", "plink")]
+    [InlineData("/usr/bin/ssh", "ssh")]
+    [InlineData("npm.cmd", "npm")]
+    [InlineData("WinSCP.com", "WinSCP")]
+    [InlineData("deploy.ps1", "deploy.ps1")]
+    public void ProgramNameStripsDirectoryAndExecutableSuffix(string program, string expected)
+    {
+        Assert.Equal(expected, Unwrapper.ProgramName(program));
+    }
+
+    [Fact]
     public void SshLoginIsKeptAsIs()
     {
         var ssh = Parse("ssh vps");

@@ -23,6 +23,11 @@ public static class Unwrapper
     private const string SshShortWithValue = "BbcDEeFIiJLlmOopQRSWw";
     private const string XargsShortWithValue = "adEILnPs";
     private static readonly string[] NoLongOptions = [];
+    private static readonly string[] PuttyOptionsWithValue =
+    [
+        "-P", "-l", "-pw", "-pwfile", "-i", "-m", "-L", "-R", "-D", "-load", "-proxycmd", "-hostkey",
+        "-sercfg", "-sshlog", "-sshrawlog", "-sessionlog", "-loghost", "-nc",
+    ];
     private static readonly string[] SudoLongWithValue =
     [
         "--user", "--group", "--host", "--prompt", "--chdir", "--chroot", "--role", "--type",
@@ -99,6 +104,34 @@ public static class Unwrapper
                 // ssh joins everything after the host into one remote command line.
                 return host + 1 < args.Count
                     && ExpandString(string.Join(' ', args.Skip(host + 1)), "ssh", cmd, depth, state, output);
+            }
+
+            case "plink" or "putty":
+            {
+                // PuTTY options are single-dash words ("-batch", "-hostkey KEY"), not clusters.
+                var host = SkipNamedOptions(args, PuttyOptionsWithValue);
+                if (host >= args.Count)
+                {
+                    return false;
+                }
+
+                state.RemoteHost ??= HostOf(args[host]);
+
+                // "-m file" runs a script we cannot see; treat it like a login.
+                if (host + 1 >= args.Count || HasNamedOption(args, args.Count, "-m"))
+                {
+                    return false;
+                }
+
+                // Keep the plink command itself visible when it carries a password, so
+                // rules can see the "-pw" argument; the remote commands follow it.
+                var hasPassword = HasNamedOption(args, args.Count, "-pw");
+                if (hasPassword)
+                {
+                    output.Add(cmd);
+                }
+
+                return ExpandString(string.Join(' ', args.Skip(host + 1)), "ssh", cmd, depth, state, output) || hasPassword;
             }
 
             case "xargs":
@@ -372,6 +405,32 @@ public static class Unwrapper
         return Math.Min(i, args.Count);
     }
 
+    // For tools whose options are whole words after one dash: returns the index of
+    // the first argument that is not an option or an option's value.
+    private static int SkipNamedOptions(IReadOnlyList<string> args, string[] withValue)
+    {
+        var i = 0;
+        while (i < args.Count && args[i].Length > 1 && args[i][0] == '-')
+        {
+            i += Array.IndexOf(withValue, args[i]) >= 0 ? 2 : 1;
+        }
+
+        return Math.Min(i, args.Count);
+    }
+
+    private static bool HasNamedOption(IReadOnlyList<string> args, int end, string option)
+    {
+        for (var i = 0; i < end; i++)
+        {
+            if (args[i] == option)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool HasShortFlag(IReadOnlyList<string> args, int end, string flags)
     {
         for (var i = 0; i < end; i++)
@@ -416,11 +475,16 @@ public static class Unwrapper
         return true;
     }
 
-    // Program without its directory or a ".exe" suffix.
+    // Program without its directory or a Windows executable suffix.
     internal static string ProgramName(string program)
     {
         var name = program[(program.AsSpan().LastIndexOfAny('/', '\\') + 1)..];
-        return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
+        return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".com", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
+            ? name[..^4]
+            : name;
     }
 
     private static string HostOf(string target) => target[(target.LastIndexOf('@') + 1)..];
