@@ -326,6 +326,42 @@ public sealed class CliTests : IDisposable
         Assert.Equal("git reset --hard", (string?)Assert.Single(destructive)!["command"]);
     }
 
+    [Theory]
+    [InlineData(140, 19, true, 139)]
+    [InlineData(100, 19, true, 99)]
+    [InlineData(99, 8, true, 98)]
+    [InlineData(80, 8, true, 8 + 2 + 6 + 2 + 11 + 2 + 15 + 2 + 40)] // rule column shown, command keeps 40
+    [InlineData(79, 8, false, 78)]
+    [InlineData(50, 8, false, 8 + 2 + 6 + 2 + 11 + 2 + 40)] // command column keeps its 40-char minimum
+    public void LogLayoutAdaptsToTerminalWidth(int width, int timeWidth, bool showRule, int expectedLength)
+    {
+        RunHook(Payload("rm -rf ~/Documents"));
+        RunHook(Payload("echo " + new string('x', 200)));
+
+        var stdout = new StringWriter();
+        LogCommand.Run(20, null, null, false, stdout, width);
+        var lines = stdout.ToString().TrimEnd().ReplaceLineEndings("\n").Split('\n');
+
+        Assert.Equal(3, lines.Length);
+        Assert.Equal(timeWidth + 2, lines[0].IndexOf("ACTION", StringComparison.Ordinal));
+        Assert.Equal(showRule, lines[0].Contains("RULE"));
+        Assert.Equal(showRule, lines[1].Contains("rm-root-or-home"));
+        Assert.EndsWith("rm -rf ~/Documents", lines[1]);
+        Assert.EndsWith("...", lines[2]);
+        Assert.DoesNotContain('…', lines[2]);
+        Assert.Equal(expectedLength, lines[2].Length);
+    }
+
+    [Fact]
+    public void LogDoesNotTruncateWhenRedirected()
+    {
+        RunHook(Payload("echo " + new string('x', 200)));
+
+        var line = Run(null, "log").Out.TrimEnd().ReplaceLineEndings("\n").Split('\n')[^1];
+
+        Assert.EndsWith(new string('x', 200), line);
+    }
+
     [Fact]
     public void LogRejectsUnknownLevel()
     {

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Getcmd.Cli.Services;
 
@@ -7,7 +8,12 @@ namespace Getcmd.Cli.Commands;
 /// <summary>getcmd log: show recent decisions from log.db.</summary>
 internal static class LogCommand
 {
-    public static int Run(int last, string? level, string? action, bool json, TextWriter stdout)
+    // The command column never gets squeezed below this; the row wraps instead.
+    private const int MinCommandWidth = 40;
+    private const string Marker = "...";
+
+    /// <param name="width">Terminal width; null means detect it, or no truncation when stdout is not a terminal.</param>
+    public static int Run(int last, string? level, string? action, bool json, TextWriter stdout, int? width = null)
     {
         List<LogEntry> entries;
         using (var log = DecisionLog.Open(AppPaths.Resolve()))
@@ -27,42 +33,77 @@ internal static class LogCommand
             return 0;
         }
 
-        var ruleWidth = 4;
-        foreach (var entry in entries)
-        {
-            ruleWidth = Math.Max(ruleWidth, (entry.RuleId ?? "-").Length);
-        }
+        width ??= ReferenceEquals(stdout, Console.Out) ? TerminalWidth() : null;
+        var layout = new Layout(width, entries);
 
-        var width = ReferenceEquals(stdout, Console.Out) ? TerminalWidth() : null;
-        WriteRow(stdout, "TIME".PadRight(19), "ACTION", "LEVEL", "RULE", "COMMAND", ruleWidth, width);
+        stdout.WriteLine(layout.Row(layout.TimeHeader, "ACTION", "LEVEL", "RULE", "COMMAND"));
         foreach (var entry in entries)
         {
-            WriteRow(stdout, LocalTime(entry.Ts), entry.Action, entry.Level, entry.RuleId ?? "-", entry.Command, ruleWidth, width);
+            stdout.WriteLine(layout.Row(
+                layout.Time(entry.Ts), entry.Action, entry.Level, entry.RuleId ?? "-", entry.Command));
         }
 
         return 0;
     }
 
-    private static void WriteRow(
-        TextWriter stdout, string time, string action, string level, string rule, string command, int ruleWidth, int? width)
+    // Column choices for one terminal width: narrower terminals get a shorter time
+    // column (under 100) and lose the rule column (under 80).
+    private sealed class Layout
     {
-        var prefix = $"{time}  {action,-6}  {level,-11}  {rule.PadRight(ruleWidth)}  ";
-        command = command.ReplaceLineEndings(" ");
+        private readonly int? _width;
+        private readonly bool _shortTime;
+        private readonly bool _showRule;
+        private readonly int _ruleWidth;
 
-        // Leave the last column free so the terminal does not wrap.
-        if (width is { } columns && prefix.Length + command.Length > columns - 1)
+        public Layout(int? width, List<LogEntry> entries)
         {
-            var room = Math.Max(columns - 1 - prefix.Length, 1);
-            command = string.Concat(command.AsSpan(0, Math.Min(room - 1, command.Length)), "…");
+            _width = width;
+            _shortTime = width < 100;
+            _showRule = width is null or >= 80;
+            _ruleWidth = 4;
+            foreach (var entry in entries)
+            {
+                _ruleWidth = Math.Max(_ruleWidth, (entry.RuleId ?? "-").Length);
+            }
         }
 
-        stdout.WriteLine(prefix + command);
-    }
+        public string TimeHeader => "TIME".PadRight(_shortTime ? 8 : 19);
 
-    private static string LocalTime(string ts) =>
-        DateTime.TryParse(ts, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var utc)
-            ? utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
-            : ts.PadRight(19);
+        public string Time(string ts)
+        {
+            if (!DateTime.TryParse(ts, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var utc))
+            {
+                return ts.PadRight(_shortTime ? 8 : 19);
+            }
+
+            return utc.ToLocalTime().ToString(_shortTime ? "HH:mm:ss" : "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        }
+
+        public string Row(string time, string action, string level, string rule, string command)
+        {
+            var prefix = new StringBuilder()
+                .Append(time).Append("  ")
+                .Append(action.PadRight(6)).Append("  ")
+                .Append(level.PadRight(11)).Append("  ");
+            if (_showRule)
+            {
+                prefix.Append(rule.PadRight(_ruleWidth)).Append("  ");
+            }
+
+            command = command.ReplaceLineEndings(" ");
+            if (_width is { } columns)
+            {
+                // Leave the last cell free so the terminal does not wrap the line itself.
+                var room = Math.Max(columns - 1 - prefix.Length, MinCommandWidth);
+                if (command.Length > room)
+                {
+                    command = string.Concat(command.AsSpan(0, room - Marker.Length), Marker);
+                }
+            }
+
+            return prefix.Append(command).ToString();
+        }
+    }
 
     private static int? TerminalWidth()
     {
