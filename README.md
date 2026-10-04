@@ -9,13 +9,13 @@ Command safety for AI coding agents. getcmd sits between Claude Code and your sh
 Linux and macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/getCMD-com/getcmd/main/install.sh | sh
+curl -fsSL https://getcmd.com/install | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/getCMD-com/getcmd/main/install.ps1 | iex
+irm https://getcmd.com/install.ps1 | iex
 ```
 
 Homebrew:

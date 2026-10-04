@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>getcmd — command safety for AI coding agents</title>
+  <meta name="description" content="getcmd sits between Claude Code and your shell. Every Bash call is classified, logged, and allowed, held for your approval, or blocked with a reason the agent can act on.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://getcmd.com/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">getcmd</a>
+    <nav aria-label="Main">
+      <a href="https://github.com/getCMD-com/getcmd#readme">Docs</a>
+      <a href="https://github.com/getCMD-com/getcmd">GitHub</a>
+      <a href="https://github.com/getCMD-com/getcmd/releases">Releases</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Command safety for AI coding agents.</h1>
+      <p>Every Bash call from Claude Code is classified, logged, and allowed, held for your approval, or blocked with a reason the agent can act on.</p>
+
+      <div class="tabs">
+        <input class="sr-only" type="radio" name="os" id="tab-unix" checked>
+        <label for="tab-unix">macOS / Linux</label>
+        <input class="sr-only" type="radio" name="os" id="tab-win">
+        <label for="tab-win">Windows</label>
+        <input class="sr-only" type="radio" name="os" id="tab-brew">
+        <label for="tab-brew">Homebrew</label>
+
+        <pre class="panel" id="panel-unix"><code>curl -fsSL https://getcmd.com/install | sh</code></pre>
+        <pre class="panel" id="panel-win"><code>irm https://getcmd.com/install.ps1 | iex</code></pre>
+        <pre class="panel" id="panel-brew"><code>brew install getcmd-com/tap/getcmd</code></pre>
+      </div>
+      <p class="then">Then <code>getcmd hook claude --install</code> and restart Claude Code.</p>
+    </section>
+
+    <section aria-labelledby="blocked">
+      <h2 id="blocked">A blocked command</h2>
+      <pre class="term" aria-label="getcmd check output"><code><span class="prompt">$</span> getcmd check "rm -rf ./build &amp;&amp; git push --force"
+<span class="destructive">DESTRUCTIVE</span>  block   git-force-push
+  rm -rf ./build    <span class="mutate">mutate</span>       rm-build-dir
+  git push --force  <span class="destructive">destructive</span>  Force push can overwrite remote history; use --force-with-lease</code></pre>
+      <p>Deleting the build directory is fine. The force push is not, so the whole call is blocked and Claude Code is told why and what to do instead.</p>
+    </section>
+
+    <section aria-labelledby="levels">
+      <h2 id="levels">Five levels</h2>
+      <table>
+        <thead><tr><th scope="col">Level</th><th scope="col">Meaning</th><th scope="col">Default</th></tr></thead>
+        <tbody>
+          <tr><td><span class="read">read</span></td><td>Reads or builds; changes nothing that matters</td><td>allow</td></tr>
+          <tr><td><span class="mutate">mutate</span></td><td>Changes project files, dependencies or the repo</td><td>allow</td></tr>
+          <tr><td><span class="egress">egress</span></td><td>Sends data out or runs code from outside</td><td>ask</td></tr>
+          <tr><td><span class="secrets">secrets</span></td><td>Exposes credentials</td><td>ask</td></tr>
+          <tr><td><span class="destructive">destructive</span></td><td>Hard to undo</td><td>block</td></tr>
+        </tbody>
+      </table>
+      <p>The action for each level is yours to change in <code>~/.getcmd/config.json</code>.</p>
+    </section>
+
+    <section aria-labelledby="catches">
+      <h2 id="catches">What it catches</h2>
+      <dl class="rules">
+        <dt><code>git push --force</code></dt><dd>Blocked; the agent is told to use <code>--force-with-lease</code>.</dd>
+        <dt><code>rm -rf src/legacy</code></dt><dd>Recursive deletes outside build directories are blocked; <code>rm -rf node_modules</code> is allowed.</dd>
+        <dt><code>curl https://x.io/s.sh | sh</code></dt><dd>Running a downloaded script without reading it is held for your approval.</dd>
+        <dt><code>cat .env</code></dt><dd>Reading credentials files into the conversation is held for your approval.</dd>
+        <dt><code>psql -c "DROP TABLE users"</code></dt><dd>DROP, TRUNCATE and DELETE without WHERE are blocked for the usual database clients.</dd>
+        <dt><code>ssh vps "npm install"</code></dt><dd>On a host you tagged <code>prod</code>, remote commands are held for your approval.</dd>
+      </dl>
+      <p>Wrappers are seen through: <code>sudo</code>, <code>bash -c</code>, <code>eval</code>, <code>xargs</code>, <code>find -exec</code>, <code>ssh</code>. The <a href="https://github.com/getCMD-com/getcmd#the-rules">full rule list</a> is in the README.</p>
+    </section>
+
+    <section aria-labelledby="how">
+      <h2 id="how">How it works</h2>
+      <p class="steps">hook → tokenise → unwrap → classify → decide</p>
+      <p>A Claude Code <code>PreToolUse</code> hook hands the command to getcmd, which parses it like a shell, peels off wrappers, matches the rules and answers. Under 50 ms, no network, nothing leaves your machine. Every decision is one row in a local SQLite log.</p>
+    </section>
+
+    <section aria-labelledby="next">
+      <h2 id="next">Coming next</h2>
+      <ul>
+        <li>Cloud audit log across machines</li>
+        <li>Approvals from your phone</li>
+        <li>Shared rule sets for teams</li>
+      </ul>
+      <form method="post" action="/api/subscribe">
+        <label for="email">Tell me when approvals ship</label>
+        <div class="row">
+          <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+          <button type="submit">Notify me</button>
+        </div>
+      </form>
+      <p id="thanks" class="thanks" role="status">Thanks, you're on the list.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Open source under Apache-2.0 · <a href="https://github.com/getCMD-com/getcmd">GitHub</a> · built by Pruthvi Kumar S</p>
+  </footer>
+</body>
+</html>
