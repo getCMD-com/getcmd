@@ -8,9 +8,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.x
 
@@ -19,3 +19,26 @@ jobs:
       - run: dotnet build --no-restore
 
       - run: dotnet test --no-build
+
+  # Catches AOT breakage (IL warnings, static SQLite linking) on every push.
+  aot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+
+      - name: Build SQLite for static linking
+        run: echo "SQLITE_OBJ=$(bash .github/scripts/build-sqlite.sh native)" >> "$GITHUB_ENV"
+
+      - name: Publish (Native AOT, linux-x64)
+        run: >
+          dotnet publish src/Getcmd.Cli -c Release -r linux-x64
+          -p:PublishAot=true -p:SqliteStaticObject="$SQLITE_OBJ" -o publish
+
+      - name: Smoke test the binary on its own
+        run: |
+          mkdir -p smoke && cp publish/getcmd smoke/
+          bash .github/scripts/smoke.sh smoke/getcmd

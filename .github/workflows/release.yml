@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, rid: linux-x64 }
+          - { os: ubuntu-24.04-arm, rid: linux-arm64 }
+          - { os: macos-latest, rid: osx-arm64 }
+          - { os: macos-13, rid: osx-x64 }
+          - { os: windows-latest, rid: win-x64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.x
+
+      - name: Version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build SQLite for static linking
+        run: echo "SQLITE_OBJ=$(bash .github/scripts/build-sqlite.sh native)" >> "$GITHUB_ENV"
+
+      - name: Publish (Native AOT)
+        run: >
+          dotnet publish src/Getcmd.Cli -c Release -r ${{ matrix.rid }}
+          -p:PublishAot=true -p:Version="$VERSION" -p:SqliteStaticObject="$SQLITE_OBJ"
+          -o publish
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          case "${{ matrix.rid }}" in
+            win-*)
+              (cd publish && 7z a -tzip "../dist/getcmd-$VERSION-${{ matrix.rid }}.zip" getcmd.exe)
+              ;;
+            *)
+              tar -C publish -czf "dist/getcmd-$VERSION-${{ matrix.rid }}.tar.gz" getcmd
+              ;;
+          esac
+          ls -l publish dist
+
+      - name: Smoke test the packaged binary
+        run: |
+          mkdir -p smoke
+          case "${{ matrix.rid }}" in
+            win-*) 7z x -osmoke "dist/getcmd-$VERSION-${{ matrix.rid }}.zip" && bash .github/scripts/smoke.sh smoke/getcmd.exe ;;
+            *) tar -C smoke -xzf "dist/getcmd-$VERSION-${{ matrix.rid }}.tar.gz" && bash .github/scripts/smoke.sh smoke/getcmd ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: getcmd-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
