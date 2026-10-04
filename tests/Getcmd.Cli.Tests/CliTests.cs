@@ -95,7 +95,6 @@ public sealed class CliTests : IDisposable
     [Theory]
     [InlineData("auto")]
     [InlineData("bypassPermissions")]
-    [InlineData("acceptEdits")]
     public void AskBecomesBlockWhenClaudeCodeAutoApproves(string mode)
     {
         var (exit, stdout, stderr) = RunHook(Payload("cat .env", mode: mode));
@@ -146,6 +145,7 @@ public sealed class CliTests : IDisposable
 
     [Theory]
     [InlineData("default")]
+    [InlineData("acceptEdits")]
     [InlineData("plan")]
     [InlineData(null)]
     public void AskIsUnchangedWhenAPromptCanBeShown(string? mode)

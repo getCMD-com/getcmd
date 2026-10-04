@@ -129,9 +129,10 @@ internal static class HookCommand
     }
 
     // Modes in which Claude Code answers permission requests itself, so an "ask"
-    // from the hook would be approved without a prompt.
+    // from the hook would be approved without a prompt. acceptEdits is not one:
+    // it auto-approves file edits but still prompts for Bash.
     private static bool AutoApproves(string? mode) =>
-        mode is "auto" or "bypassPermissions" or "acceptEdits";
+        mode is "auto" or "bypassPermissions";
 
     // One line the agent can act on instead of retrying the blocked command.
     private static string? SaferAlternative(string? ruleId) => ruleId switch
