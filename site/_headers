@@ -3,7 +3,7 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'
   Cache-Control: public, max-age=3600
 
 /install
@@ -13,6 +13,3 @@
 /install.ps1
   Content-Type: text/plain; charset=utf-8
   Cache-Control: public, max-age=600
-
-/api/*
-  Cache-Control: no-store
