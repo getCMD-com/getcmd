@@ -45,7 +45,13 @@ flags=(
 
 case "$(uname -s)" in
   MINGW* | MSYS* | CYGWIN*)
-    clang -c "${flags[@]}" "$src" -o "$out/sqlite3.obj"
+    # clang targets the host (x64 or ARM64) and emits an MSVC-compatible object;
+    # cl is the fallback when a developer command prompt is set up instead.
+    if command -v clang > /dev/null; then
+      clang -c "${flags[@]}" "$src" -o "$out/sqlite3.obj"
+    else
+      cl -nologo -O2 -c "${flags[@]}" "$src" "-Fo$out/sqlite3.obj" > /dev/null
+    fi
     cygpath -w "$(realpath "$out/sqlite3.obj")"
     ;;
   *)

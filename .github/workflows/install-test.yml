@@ -1,0 +1,23 @@
+name: Install test
+
+on:
+  push:
+    paths:
+      - install.sh
+      - .github/scripts/install-test.sh
+      - .github/workflows/install-test.yml
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "alpine:3.20"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: install.sh against the latest release
+        run: bash .github/scripts/install-test.sh "${{ matrix.image }}"
