@@ -8,10 +8,23 @@ set -euo pipefail
 
 version=3500400 # 3.50.4
 year=2025
+sha256=1d3049dd0f830a025a53105fc79fd2ab9431aea99e137809d064d8ee8356b032
 out="${1:-native}"
 
 mkdir -p "$out"
 curl -fsSL -o "$out/sqlite.zip" "https://sqlite.org/$year/sqlite-amalgamation-$version.zip"
+
+# Refuse to build from anything but the pinned amalgamation.
+if command -v sha256sum > /dev/null; then
+  actual=$(sha256sum "$out/sqlite.zip" | cut -d' ' -f1)
+else
+  actual=$(shasum -a 256 "$out/sqlite.zip" | cut -d' ' -f1)
+fi
+if [ "$actual" != "$sha256" ]; then
+  echo "sqlite-amalgamation-$version.zip: expected sha256 $sha256, got $actual" >&2
+  exit 1
+fi
+
 unzip -q -o "$out/sqlite.zip" -d "$out"
 src="$out/sqlite-amalgamation-$version/sqlite3.c"
 
