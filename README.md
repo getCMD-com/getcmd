@@ -47,6 +47,8 @@ Each command is placed on one of five levels. The level decides the default acti
 | secrets | Exposes credentials | ask | `cat .env`, `echo $API_KEY`, `mysql -pPASSWORD` |
 | destructive | Hard to undo | block | `git push --force`, `rm -rf ~`, `DROP TABLE`, `kubectl delete` |
 
+When Claude Code runs in a mode that auto-approves (`auto`, `bypassPermissions`, `acceptEdits`), a hook's "ask" is approved without anyone seeing a prompt. getcmd therefore turns ask into block in those modes, and says so in the message; set `askWhenAutoApproved` to `allow` or `ask` in `config.json` if you want the old behaviour.
+
 Modifiers: `sudo` raises a command one level; a host tagged `prod` in `hostTags` turns mutate into egress and makes otherwise-unknown remote commands egress; wrappers nested too deep to inspect are at least egress.
 
 ## The rules
@@ -125,6 +127,7 @@ EGRESS       ask     project-write
 | `hostTags` | `{}` | Tags for ssh hosts; `"prod"` escalates, for example `{"vps": "prod"}` |
 | `disabledRules` | `[]` | Rule ids to skip |
 | `logRetentionDays` | `30` | How long rows stay in `log.db` |
+| `askWhenAutoApproved` | `"block"` | What "ask" becomes when Claude Code auto-approves: `block`, `allow` or `ask` |
 
 If the file cannot be parsed, getcmd logs the error to `~/.getcmd/hook-errors.log`, uses the defaults and keeps enforcing; `getcmd doctor` reports it. `GETCMD_DISABLE=1` makes the hook exit without evaluating.
 

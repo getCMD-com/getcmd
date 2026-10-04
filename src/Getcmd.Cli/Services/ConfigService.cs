@@ -24,6 +24,12 @@ internal sealed class Config
     public List<string>? DisabledRules { get; set; } = [];
 
     public int LogRetentionDays { get; set; } = 30;
+
+    /// <summary>
+    /// What an "ask" decision becomes when Claude Code runs in a mode that
+    /// auto-approves, where a prompt would never be shown: "block", "allow" or "ask".
+    /// </summary>
+    public string? AskWhenAutoApproved { get; set; } = "block";
 }
 
 internal static class ConfigService
@@ -73,8 +79,17 @@ internal static class ConfigService
             Overlay([], config.Actions);
         }
 
+        if (!Names.TryParseAction(config.AskWhenAutoApproved ?? "block", out _))
+        {
+            throw new FormatException($"config.json: unknown askWhenAutoApproved \"{config.AskWhenAutoApproved}\" (block, allow or ask)");
+        }
+
         return config;
     }
+
+    /// <summary>The configured action for "ask" in an auto-approving mode; block unless set otherwise.</summary>
+    public static Action AskWhenAutoApproved(Config config) =>
+        Names.TryParseAction(config.AskWhenAutoApproved, out var action) ? action : Action.Block;
 
     public static void Save(AppPaths paths, Config config)
     {

@@ -81,6 +81,7 @@
       <h2 id="how">How it works</h2>
       <p class="steps">hook → tokenise → unwrap → classify → decide</p>
       <p>A Claude Code <code>PreToolUse</code> hook hands the command to getcmd, which parses it like a shell, peels off wrappers, matches the rules and answers. Under 50 ms, no network, nothing leaves your machine. Every decision is one row in a local SQLite log.</p>
+      <p>In auto-approve mode, ask becomes block, because a prompt nobody sees is not a safeguard.</p>
     </section>
 
     <section aria-labelledby="next">

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Getcmd.Core;
 using Microsoft.Data.Sqlite;
+using Action = Getcmd.Core.Action;
 
 namespace Getcmd.Cli.Services;
 
@@ -12,8 +13,13 @@ internal sealed class DecisionLog : IDisposable
         PRAGMA busy_timeout=2000;
         CREATE TABLE IF NOT EXISTS decisions(
             id INTEGER PRIMARY KEY, ts TEXT, agent TEXT, session_id TEXT, cwd TEXT, command TEXT,
-            level TEXT, action TEXT, rule_id TEXT, reason TEXT, duration_ms INTEGER);
+            level TEXT, action TEXT, rule_id TEXT, reason TEXT, duration_ms INTEGER, mode TEXT);
         CREATE INDEX IF NOT EXISTS idx_decisions_ts ON decisions(ts);
+        """;
+
+    // Databases created before the mode column existed get it added on open.
+    private const string Migrate = """
+        SELECT COUNT(*) FROM pragma_table_info('decisions') WHERE name = 'mode';
         """;
 
     // Old rows are pruned once every this many inserts, to keep the hook path light.
@@ -43,6 +49,13 @@ internal sealed class DecisionLog : IDisposable
             using var command = connection.CreateCommand();
             command.CommandText = Schema;
             command.ExecuteNonQuery();
+
+            command.CommandText = Migrate;
+            if ((long)command.ExecuteScalar()! == 0)
+            {
+                command.CommandText = "ALTER TABLE decisions ADD COLUMN mode TEXT";
+                command.ExecuteNonQuery();
+            }
         }
         catch
         {
@@ -65,7 +78,10 @@ internal sealed class DecisionLog : IDisposable
         string cwd,
         string command,
         Decision decision,
-        TimeSpan elapsed)
+        TimeSpan elapsed,
+        Action? effectiveAction = null,
+        string? reason = null,
+        string? mode = null)
     {
         try
         {
@@ -79,10 +95,11 @@ internal sealed class DecisionLog : IDisposable
                     cwd,
                     command,
                     Names.Of(decision.Level),
-                    Names.Of(decision.Action),
+                    Names.Of(effectiveAction ?? decision.Action),
                     decision.RuleId,
-                    decision.Reason,
-                    (long)elapsed.TotalMilliseconds),
+                    reason ?? decision.Reason,
+                    (long)elapsed.TotalMilliseconds,
+                    mode),
                 config.LogRetentionDays);
         }
         catch (Exception ex)
@@ -99,10 +116,11 @@ internal sealed class DecisionLog : IDisposable
     {
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO decisions(ts, agent, session_id, cwd, command, level, action, rule_id, reason, duration_ms)
-            VALUES ($ts, $agent, $session, $cwd, $command, $level, $action, $rule, $reason, $duration);
+            INSERT INTO decisions(ts, agent, session_id, cwd, command, level, action, rule_id, reason, duration_ms, mode)
+            VALUES ($ts, $agent, $session, $cwd, $command, $level, $action, $rule, $reason, $duration, $mode);
             SELECT last_insert_rowid();
             """;
+        command.Parameters.AddWithValue("$mode", (object?)entry.Mode ?? DBNull.Value);
         command.Parameters.AddWithValue("$ts", entry.Ts);
         command.Parameters.AddWithValue("$agent", entry.Agent);
         command.Parameters.AddWithValue("$session", (object?)entry.SessionId ?? DBNull.Value);
@@ -139,7 +157,7 @@ internal sealed class DecisionLog : IDisposable
     {
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            SELECT id, ts, agent, session_id, cwd, command, level, action, rule_id, reason, duration_ms
+            SELECT id, ts, agent, session_id, cwd, command, level, action, rule_id, reason, duration_ms, mode
             FROM decisions
             WHERE ($level IS NULL OR level = $level) AND ($action IS NULL OR action = $action)
             ORDER BY id DESC
@@ -164,7 +182,8 @@ internal sealed class DecisionLog : IDisposable
                 reader.GetString(7),
                 reader.IsDBNull(8) ? null : reader.GetString(8),
                 reader.GetString(9),
-                reader.GetInt64(10)));
+                reader.GetInt64(10),
+                reader.IsDBNull(11) ? null : reader.GetString(11)));
         }
 
         entries.Reverse();

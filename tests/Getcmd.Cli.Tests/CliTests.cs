@@ -40,7 +40,7 @@ public sealed class CliTests : IDisposable
     private static (int Exit, string Out, string Err) RunHook(string stdin) => Run(stdin, "hook", "claude");
 
     // Same shape as a real Claude Code PreToolUse payload.
-    private static string Payload(string? command, string toolName = "Bash")
+    private static string Payload(string? command, string toolName = "Bash", string? mode = "default")
     {
         var toolInput = new JsonObject { ["description"] = "test" };
         if (command is not null)
@@ -53,7 +53,7 @@ public sealed class CliTests : IDisposable
             ["session_id"] = SessionId,
             ["transcript_path"] = "/home/ally/.claude/projects/app/session.jsonl",
             ["cwd"] = Cwd,
-            ["permission_mode"] = "auto",
+            ["permission_mode"] = mode,
             ["hook_event_name"] = "PreToolUse",
             ["tool_name"] = toolName,
             ["tool_input"] = toolInput,
@@ -90,6 +90,110 @@ public sealed class CliTests : IDisposable
         Assert.Equal("PreToolUse", (string?)output["hookEventName"]);
         Assert.Equal("ask", (string?)output["permissionDecision"]);
         Assert.Equal("getcmd: egress — Publishes a package", (string?)output["permissionDecisionReason"]);
+    }
+
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("bypassPermissions")]
+    [InlineData("acceptEdits")]
+    public void AskBecomesBlockWhenClaudeCodeAutoApproves(string mode)
+    {
+        var (exit, stdout, stderr) = RunHook(Payload("cat .env", mode: mode));
+
+        Assert.Equal(2, exit);
+        Assert.Empty(stdout);
+        Assert.Equal(
+            "getcmd blocked (secrets, read-credentials): Reads a credentials file into the conversation."
+            + $" Claude Code is in {mode} mode, so an approval prompt cannot be shown;"
+            + " run this yourself or set askWhenAutoApproved in ~/.getcmd/config.json.",
+            stderr.TrimEnd());
+
+        var row = Assert.Single(LogRows());
+        Assert.Equal("block", row.Action);
+        Assert.Equal("secrets", row.Level);
+        Assert.Equal(mode, row.Mode);
+        Assert.EndsWith($"; blocked instead of asking in {mode} mode", row.Reason);
+    }
+
+    [Fact]
+    public void AskCanBeConfiguredToAllowWhenAutoApproved()
+    {
+        File.WriteAllText(Path.Combine(_home, "config.json"), """{ "askWhenAutoApproved": "allow" }""");
+
+        var (exit, stdout, stderr) = RunHook(Payload("npm publish", mode: "auto"));
+
+        Assert.Equal(0, exit);
+        Assert.Empty(stdout);
+        Assert.Empty(stderr);
+
+        var row = Assert.Single(LogRows());
+        Assert.Equal("allow", row.Action);
+        Assert.Equal("Publishes a package; auto-approved mode", row.Reason);
+        Assert.Equal("auto", row.Mode);
+    }
+
+    [Fact]
+    public void AskCanBeConfiguredToStayAskWhenAutoApproved()
+    {
+        File.WriteAllText(Path.Combine(_home, "config.json"), """{ "askWhenAutoApproved": "ask" }""");
+
+        var (exit, stdout, _) = RunHook(Payload("npm publish", mode: "auto"));
+
+        Assert.Equal(0, exit);
+        Assert.Equal("ask", (string?)JsonNode.Parse(stdout)!["hookSpecificOutput"]!["permissionDecision"]);
+        Assert.Equal("ask", Assert.Single(LogRows()).Action);
+    }
+
+    [Theory]
+    [InlineData("default")]
+    [InlineData("plan")]
+    [InlineData(null)]
+    public void AskIsUnchangedWhenAPromptCanBeShown(string? mode)
+    {
+        var (exit, stdout, stderr) = RunHook(Payload("npm publish", mode: mode));
+
+        Assert.Equal(0, exit);
+        Assert.Empty(stderr);
+        var output = JsonNode.Parse(stdout)!["hookSpecificOutput"]!;
+        Assert.Equal("ask", (string?)output["permissionDecision"]);
+        Assert.Equal("getcmd: egress — Publishes a package", (string?)output["permissionDecisionReason"]);
+
+        var row = Assert.Single(LogRows());
+        Assert.Equal("ask", row.Action);
+        Assert.Equal(mode, row.Mode);
+    }
+
+    [Fact]
+    public void AllowAndBlockIgnoreTheMode()
+    {
+        Assert.Equal(0, RunHook(Payload("ls", mode: "auto")).Exit);
+        Assert.Equal(2, RunHook(Payload("git reset --hard", mode: "auto")).Exit);
+    }
+
+    [Fact]
+    public void ExistingDatabaseGetsTheModeColumn()
+    {
+        var paths = new AppPaths(_home);
+        paths.EnsureHome();
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={paths.LogDb};Pooling=False"))
+        {
+            connection.Open();
+            using var create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE decisions(id INTEGER PRIMARY KEY, ts TEXT, agent TEXT, session_id TEXT, cwd TEXT,
+                    command TEXT, level TEXT, action TEXT, rule_id TEXT, reason TEXT, duration_ms INTEGER);
+                INSERT INTO decisions(ts, agent, cwd, command, level, action, reason, duration_ms)
+                VALUES ('2026-10-01T00:00:00.000Z', 'claude', '/x', 'ls', 'read', 'allow', 'old row', 1);
+                """;
+            create.ExecuteNonQuery();
+        }
+
+        RunHook(Payload("ls", mode: "auto"));
+
+        var rows = LogRows();
+        Assert.Equal(2, rows.Count);
+        Assert.Null(rows[0].Mode);
+        Assert.Equal("auto", rows[1].Mode);
     }
 
     [Fact]
@@ -180,6 +284,7 @@ public sealed class CliTests : IDisposable
     [InlineData("""{ "actions": { "destructive": "explode" } }""", "unknown action \"explode\"")]
     [InlineData("""{ "actions": { "destructive": "allow" }, """, "config.json: ")]
     [InlineData("null", "expected a JSON object")]
+    [InlineData("""{ "askWhenAutoApproved": "maybe" }""", "unknown askWhenAutoApproved \"maybe\"")]
     public void InvalidConfigFallsBackToDefaultsAndKeepsEnforcing(string config, string expectedError)
     {
         var configFile = Path.Combine(_home, "config.json");
@@ -263,6 +368,7 @@ public sealed class CliTests : IDisposable
         Assert.Empty(config["hostTags"]!.AsObject());
         Assert.Empty(config["disabledRules"]!.AsArray());
         Assert.Equal(30, (int?)config["logRetentionDays"]);
+        Assert.Equal("block", (string?)config["askWhenAutoApproved"]);
     }
 
     [Theory]
@@ -328,7 +434,7 @@ public sealed class CliTests : IDisposable
 
     [Theory]
     [InlineData(140, 19, true, 139)]
-    [InlineData(100, 19, true, 99)]
+    [InlineData(100, 19, true, 19 + 2 + 6 + 2 + 11 + 2 + 7 + 2 + 15 + 2 + 40)] // mode column shown, command keeps 40
     [InlineData(99, 8, true, 98)]
     [InlineData(80, 8, true, 8 + 2 + 6 + 2 + 11 + 2 + 15 + 2 + 40)] // rule column shown, command keeps 40
     [InlineData(79, 8, false, 78)]
@@ -346,6 +452,8 @@ public sealed class CliTests : IDisposable
         Assert.Equal(timeWidth + 2, lines[0].IndexOf("ACTION", StringComparison.Ordinal));
         Assert.Equal(showRule, lines[0].Contains("RULE"));
         Assert.Equal(showRule, lines[1].Contains("rm-root-or-home"));
+        Assert.Equal(width >= 100, lines[0].Contains("MODE"));
+        Assert.Equal(width >= 100, lines[1].Contains("  default  "));
         Assert.EndsWith("rm -rf ~/Documents", lines[1]);
         Assert.EndsWith("...", lines[2]);
         Assert.DoesNotContain('…', lines[2]);
@@ -443,6 +551,7 @@ public sealed class CliTests : IDisposable
         Assert.Matches(@"OK\s+home writable", stdout);
         Assert.Matches(@"OK\s+log\.db opens", stdout);
         Assert.Matches(@"OK\s+config parses", stdout);
+        Assert.Matches(@"OK\s+ask in auto mode\s+block", stdout);
         Assert.Matches(@"OK\s+version\s+0\.0\.1-dev", stdout);
         Assert.Matches(@"(OK|FAIL)\s+binary on PATH", stdout);
         Assert.Matches(@"(OK|FAIL)\s+hook installed", stdout);

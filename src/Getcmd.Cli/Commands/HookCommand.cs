@@ -37,10 +37,35 @@ internal static class HookCommand
             var cwd = string.IsNullOrEmpty(input.Cwd) ? Environment.CurrentDirectory : input.Cwd;
             var decision = RuleEngine.Evaluate(command, ConfigService.ToContext(config, cwd), ConfigService.ActiveRules(config));
             var level = Names.Of(decision.Level);
-            DecisionLog.Record(
-                paths, config, Agent, input.SessionId, cwd, command, decision, Stopwatch.GetElapsedTime(started));
+            var mode = input.PermissionMode;
+            var action = decision.Action;
+            var reason = decision.Reason;
+            string? note = null;
 
-            switch (decision.Action)
+            // In a mode that auto-approves, "ask" is answered without anyone seeing
+            // a prompt, so it is turned into whatever askWhenAutoApproved says.
+            if (action == Action.Ask && AutoApproves(mode))
+            {
+                switch (ConfigService.AskWhenAutoApproved(config))
+                {
+                    case Action.Allow:
+                        action = Action.Allow;
+                        reason += "; auto-approved mode";
+                        break;
+                    case Action.Block:
+                        action = Action.Block;
+                        reason += $"; blocked instead of asking in {mode} mode";
+                        note = $" Claude Code is in {mode} mode, so an approval prompt cannot be shown;"
+                            + " run this yourself or set askWhenAutoApproved in ~/.getcmd/config.json.";
+                        break;
+                }
+            }
+
+            DecisionLog.Record(
+                paths, config, Agent, input.SessionId, cwd, command, decision, Stopwatch.GetElapsedTime(started),
+                action, reason, mode);
+
+            switch (action)
             {
                 case Action.Allow:
                     return 0;
@@ -54,10 +79,9 @@ internal static class HookCommand
                     return 0;
 
                 default:
-                    var alternative = SaferAlternative(decision.RuleId);
                     stderr.WriteLine(
                         $"getcmd blocked ({level}, {decision.RuleId ?? "no rule"}): {decision.Reason}."
-                        + (alternative is null ? "" : " " + alternative));
+                        + (note ?? (SaferAlternative(decision.RuleId) is { } alt ? " " + alt : "")));
                     return 2;
             }
         }
@@ -103,6 +127,11 @@ internal static class HookCommand
 
         return 0;
     }
+
+    // Modes in which Claude Code answers permission requests itself, so an "ask"
+    // from the hook would be approved without a prompt.
+    private static bool AutoApproves(string? mode) =>
+        mode is "auto" or "bypassPermissions" or "acceptEdits";
 
     // One line the agent can act on instead of retrying the blocked command.
     private static string? SaferAlternative(string? ruleId) => ruleId switch

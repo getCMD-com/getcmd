@@ -24,6 +24,9 @@ internal sealed class HookInput
 
     [JsonPropertyName("hook_event_name")]
     public string? HookEventName { get; set; }
+
+    [JsonPropertyName("permission_mode")]
+    public string? PermissionMode { get; set; }
 }
 
 internal sealed class HookToolInput
@@ -85,7 +88,8 @@ internal sealed record LogEntry(
     string Action,
     string? RuleId,
     string Reason,
-    long DurationMs);
+    long DurationMs,
+    string? Mode);
 
 /// <summary>One entry of rules/cases.json.</summary>
 internal sealed class RuleCase

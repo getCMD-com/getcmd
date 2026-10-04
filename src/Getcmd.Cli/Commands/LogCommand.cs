@@ -36,33 +36,39 @@ internal static class LogCommand
         width ??= ReferenceEquals(stdout, Console.Out) ? TerminalWidth() : null;
         var layout = new Layout(width, entries);
 
-        stdout.WriteLine(layout.Row(layout.TimeHeader, "ACTION", "LEVEL", "RULE", "COMMAND"));
+        stdout.WriteLine(layout.Row(layout.TimeHeader, "ACTION", "LEVEL", "MODE", "RULE", "COMMAND"));
         foreach (var entry in entries)
         {
             stdout.WriteLine(layout.Row(
-                layout.Time(entry.Ts), entry.Action, entry.Level, entry.RuleId ?? "-", entry.Command));
+                layout.Time(entry.Ts), entry.Action, entry.Level, entry.Mode ?? "-", entry.RuleId ?? "-", entry.Command));
         }
 
         return 0;
     }
 
-    // Column choices for one terminal width: narrower terminals get a shorter time
-    // column (under 100) and lose the rule column (under 80).
+    // Column choices for one terminal width: the mode column needs 100 columns,
+    // narrower terminals get a shorter time column (under 100) and lose the
+    // rule column (under 80).
     private sealed class Layout
     {
         private readonly int? _width;
         private readonly bool _shortTime;
+        private readonly bool _showMode;
         private readonly bool _showRule;
+        private readonly int _modeWidth;
         private readonly int _ruleWidth;
 
         public Layout(int? width, List<LogEntry> entries)
         {
             _width = width;
             _shortTime = width < 100;
+            _showMode = width is null or >= 100;
             _showRule = width is null or >= 80;
+            _modeWidth = 4;
             _ruleWidth = 4;
             foreach (var entry in entries)
             {
+                _modeWidth = Math.Max(_modeWidth, (entry.Mode ?? "-").Length);
                 _ruleWidth = Math.Max(_ruleWidth, (entry.RuleId ?? "-").Length);
             }
         }
@@ -79,12 +85,17 @@ internal static class LogCommand
             return utc.ToLocalTime().ToString(_shortTime ? "HH:mm:ss" : "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
         }
 
-        public string Row(string time, string action, string level, string rule, string command)
+        public string Row(string time, string action, string level, string mode, string rule, string command)
         {
             var prefix = new StringBuilder()
                 .Append(time).Append("  ")
                 .Append(action.PadRight(6)).Append("  ")
                 .Append(level.PadRight(11)).Append("  ");
+            if (_showMode)
+            {
+                prefix.Append(mode.PadRight(_modeWidth)).Append("  ");
+            }
+
             if (_showRule)
             {
                 prefix.Append(rule.PadRight(_ruleWidth)).Append("  ");

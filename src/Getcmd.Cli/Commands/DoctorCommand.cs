@@ -59,6 +59,8 @@ internal static class DoctorCommand
             return paths.ConfigFile;
         });
 
+        Check("ask in auto mode", () => Names.Of(ConfigService.AskWhenAutoApproved(ConfigService.Load(paths))));
+
         Check("hook installed", () =>
         {
             var settings = ClaudeSettings.UserSettingsPath;
