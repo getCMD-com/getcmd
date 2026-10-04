@@ -381,6 +381,18 @@ public sealed class CliTests : IDisposable
     }
 
     [Fact]
+    public void RulesListMarkdownIsATable()
+    {
+        var lines = Run(null, "rules", "list", "--markdown").Out.TrimEnd().ReplaceLineEndings("\n").Split('\n');
+
+        Assert.Equal(31, lines.Length);
+        Assert.Equal("| Rule | Level | What it catches |", lines[0]);
+        Assert.Equal("|---|---|---|", lines[1]);
+        Assert.StartsWith("| `rm-root-or-home` | destructive | ", lines[2]);
+        Assert.All(lines, line => Assert.Equal(4, line.Count(c => c == '|')));
+    }
+
+    [Fact]
     public void DisabledRuleIsSkippedUntilEnabledAgain()
     {
         Assert.Equal(0, Run(null, "rules", "disable", "git-force-push").Exit);

@@ -98,8 +98,9 @@ internal static class Program
         var rules = new Command("rules", "List, test, disable or enable the builtin rules");
         rules.SetAction(_ => Guard(() => RulesCommand.List(stdout)));
 
-        var rulesList = new Command("list", "Show every builtin rule");
-        rulesList.SetAction(_ => Guard(() => RulesCommand.List(stdout)));
+        var markdownOption = new Option<bool>("--markdown") { Description = "Print the list as a Markdown table" };
+        var rulesList = new Command("list", "Show every builtin rule") { markdownOption };
+        rulesList.SetAction(result => Guard(() => RulesCommand.List(stdout, result.GetValue(markdownOption))));
         rules.Subcommands.Add(rulesList);
 
         var rulesTest = new Command("test", "Run rules/cases.json from the working directory, or the embedded copy");

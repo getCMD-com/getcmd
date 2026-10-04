@@ -16,15 +16,31 @@ internal static class RulesCommand
     private const string CasesHome = "/home/ally";
     private static readonly string[] CasesBuildDirs = ["build", "dist", "node_modules"];
 
-    public static int List(TextWriter stdout)
+    /// <param name="markdown">Emit a Markdown table (for the README) instead of the plain listing.</param>
+    public static int List(TextWriter stdout, bool markdown = false)
     {
         var disabled = ConfigService.Load(AppPaths.Resolve()).DisabledRules ?? [];
+
+        if (markdown)
+        {
+            stdout.WriteLine("| Rule | Level | What it catches |");
+            stdout.WriteLine("|---|---|---|");
+        }
 
         // Alternatives of one rule share an id; show each id once.
         var seen = new HashSet<string>();
         foreach (var rule in BuiltinRules.All)
         {
-            if (seen.Add(rule.Id))
+            if (!seen.Add(rule.Id))
+            {
+                continue;
+            }
+
+            if (markdown)
+            {
+                stdout.WriteLine($"| `{rule.Id}` | {Names.Of(rule.Level)} | {rule.Reason.Replace("|", "\\|")} |");
+            }
+            else
             {
                 var mark = disabled.Contains(rule.Id) ? "  (disabled)" : "";
                 stdout.WriteLine($"{rule.Id,-21} {Names.Of(rule.Level),-12} {rule.Reason}{mark}");
