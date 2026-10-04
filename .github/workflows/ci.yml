@@ -20,6 +20,12 @@ jobs:
 
       - run: dotnet test --no-build
 
+      # The site serves copies of the install scripts; they must not drift.
+      - name: install scripts in sync with site/
+        run: |
+          cmp install.sh site/install
+          cmp install.ps1 site/install.ps1
+
   # Catches AOT breakage (IL warnings, static SQLite linking) on every push.
   aot:
     runs-on: ubuntu-latest

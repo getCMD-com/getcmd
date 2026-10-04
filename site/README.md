@@ -1,6 +1,6 @@
 # getcmd.com
 
-Static site for getcmd, deployed to Cloudflare Pages by `.github/workflows/site.yml` on every push to `main` that touches `site/**`. No framework, no build step, no JavaScript.
+Static site for getcmd, served by Cloudflare Pages straight from this directory. No framework, no build step, no JavaScript. Pages is connected to the GitHub repo and deploys `site/` on every push to `main`.
 
 | Path | What |
 |---|---|
@@ -11,10 +11,12 @@ Static site for getcmd, deployed to Cloudflare Pages by `.github/workflows/site.
 
 ## One-time setup
 
-1. **Pages project.** Cloudflare dashboard → Workers & Pages → Create → Pages → "Upload assets" (direct upload, not Git) → name it `getcmd`. The first upload can be anything; the workflow replaces it.
-2. **API token.** My Profile → API Tokens → Create Token → template "Edit Cloudflare Workers" (it covers Pages). Add it to the GitHub repo as the `CLOUDFLARE_API_TOKEN` secret, and the account id (Workers & Pages overview, right-hand column) as `CLOUDFLARE_ACCOUNT_ID`.
-3. **Custom domain.** Pages project → Custom domains → add `getcmd.com` and `www.getcmd.com`. The zone must already be on Cloudflare; Pages creates the DNS records.
-4. Push a change under `site/` (or re-run the workflow from the Actions tab) to deploy.
+1. Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**, authorise Cloudflare on GitHub and pick `getCMD-com/getcmd`.
+2. Build settings: production branch `main`, framework preset **None**, build command empty, build output directory `site`.
+3. Deploy. The first build gives you `getcmd.pages.dev`.
+4. **Custom domains** → add `getcmd.com` and `www.getcmd.com`. The zone must already be on Cloudflare; Pages creates the DNS records.
+
+Every push to `main` redeploys, including pushes that do not touch `site/`. That is harmless.
 
 ## Local preview
 
